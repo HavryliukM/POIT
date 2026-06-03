@@ -91,7 +91,7 @@ function setGauge(arcEl, valEl, badgeEl, value, min, max, unit) {
 }
 
 // ─── Chart.js (MISA style — Dual Y-Axis) ───
-const MAX_CHART_POINTS = 30;
+// Chart shows all data from current session — no limit
 const chart = new Chart(document.getElementById('main-chart').getContext('2d'), {
     type: 'line',
     data: {
@@ -276,39 +276,51 @@ const archiveChart = new Chart(document.getElementById('archive-chart').getConte
     },
 });
 
+function clearMainChart() {
+    chart.data.labels = [];
+    chart.data.datasets[0].data = [];
+    chart.data.datasets[1].data = [];
+    chart.update('none');
+}
+
 function addChartPoint(label, temp, hum) {
-    if (chart.data.labels.length >= MAX_CHART_POINTS) {
-        chart.data.labels.shift();
-        chart.data.datasets[0].data.shift();
-        chart.data.datasets[1].data.shift();
-    }
     chart.data.labels.push(label);
     chart.data.datasets[0].data.push(temp);
     chart.data.datasets[1].data.push(hum);
     chart.update('none');
 }
 
+// ─── Light level helper ───
+function getLightLevel(lightBit, lightVal) {
+    if (lightVal === undefined || lightVal === null) {
+        // fallback to binary
+        return lightBit ? { text: 'Priame svetlo', color: '#f59e0b' } : { text: 'Tieň', color: '#64748b' };
+    }
+    const v = parseInt(lightVal);
+    if (v < 200)        return { text: 'Tma',           color: '#334155' };
+    if (v < 800)        return { text: 'Tieň',          color: '#64748b' };
+    if (v < 1800)       return { text: 'Slabé svetlo',  color: '#a3e635' };
+    if (v < 3000)       return { text: 'Silné svetlo',  color: '#fbbf24' };
+    return               { text: 'Priame svetlo', color: '#f59e0b' };
+}
+
 // ─── Table Row ───
-function addHistoryRow(ts, temp, hum, light) {
+function addHistoryRow(ts, temp, hum, light, lightVal) {
+    const timeOnly = ts.includes(' ') ? ts.split(' ')[1] : ts;
     const tr = els.historyBody.insertRow(0);
-    const lightColor = light ? '#eab308' : '#64748b';
-    const lightText = light ? '☀️ Priame' : '🌑 Tieň';
-    tr.innerHTML = `<td>${ts}</td><td>${parseFloat(temp).toFixed(1)}</td><td>${parseFloat(hum).toFixed(1)}</td><td style="color:${lightColor}; font-weight:600; font-size:0.78rem">${lightText}</td>`;
+    const lv = getLightLevel(light, lightVal);
+    tr.innerHTML = `<td>${timeOnly}</td><td>${parseFloat(temp).toFixed(1)} °C</td><td>${parseFloat(hum).toFixed(1)} %</td><td style="color:${lv.color}; font-weight:600; font-size:0.78rem">${lv.text}</td>`;
     if (els.historyBody.rows.length > 50) els.historyBody.deleteRow(-1);
 }
 
 // ─── Light Indicator ───
 function updateLight(light, lightVal) {
-    if (light) {
-        els.lightDot.className = 'light-dot light-dot--active';
-        els.lightText.textContent = 'Priame svetlo';
-        els.lightText.style.color = '#eab308';
-    } else {
-        els.lightDot.className = 'light-dot';
-        els.lightText.textContent = 'Tieň';
-        els.lightText.style.color = '';
-    }
-    els.lightVal.textContent = lightVal;
+    const lv = getLightLevel(light, lightVal);
+    const isActive = (lightVal !== undefined && parseInt(lightVal) >= 1800) || (lightVal === undefined && light);
+    els.lightDot.className = isActive ? 'light-dot light-dot--active' : 'light-dot';
+    els.lightText.textContent = lv.text;
+    els.lightText.style.color = lv.color;
+    els.lightVal.textContent = lightVal ?? '0';
 }
 
 // ─── IR Badge ───
@@ -351,7 +363,9 @@ function handleMessage(event) {
             logType = 'ir';
             updateIRBadge(trigger, action);
         }
-        if (action === 'start') logType = logType || 'start';
+        if (action === 'start') {
+            logType = logType || 'start';
+        }
         if (action === 'stop') logType = logType || 'stop';
         log(logText, logType);
 
@@ -376,12 +390,13 @@ function handleMessage(event) {
         setGauge(els.humArc, els.humVal, els.humBadge, hum, 0, 100, '%');
 
         // Info karta
-        els.lastUpdate.textContent = timestamp;
+        const timeOnly = timestamp.includes(' ') ? timestamp.split(' ')[1] : timestamp;
+        els.lastUpdate.textContent = timeOnly;
         updateLight(light, light_val);
 
         // Graf a tabuľka
-        addChartPoint(timestamp.split(' ')[1], temp, hum);
-        addHistoryRow(timestamp, temp, hum, light);
+        addChartPoint(timeOnly, temp, hum);
+        addHistoryRow(timestamp, temp, hum, light, light_val);
     }
 }
 
@@ -441,9 +456,8 @@ els.btnOpen.onclick  = () => send({ action: 'open' });
 els.btnStart.onclick = () => send({ action: 'start' });
 els.btnStop.onclick  = () => send({ action: 'stop' });
 els.btnClose.onclick = () => send({ action: 'close' });
+// Period is only applied when Nastaviť button is clicked
 els.btnSet.onclick   = () => send({ action: 'set_params', interval: parseFloat(els.interval.value) });
-els.interval.onchange = () => send({ action: 'set_params', interval: parseFloat(els.interval.value) });
-els.interval.oninput  = () => send({ action: 'set_params', interval: parseFloat(els.interval.value) });
 // ─── Update CSV Dropdown ───
 async function updateCsvDropdown(selectToValue) {
     const select = document.getElementById('csv-filename');
@@ -542,15 +556,14 @@ function displayArchiveData(data) {
     
     // Fill data
     data.forEach(d => {
-        const label = d.timestamp.split(' ')[1] || d.timestamp;
-        archiveChart.data.labels.push(label);
+        const timeOnly = d.timestamp.includes(' ') ? d.timestamp.split(' ')[1] : d.timestamp;
+        archiveChart.data.labels.push(timeOnly);
         archiveChart.data.datasets[0].data.push(d.temp);
         archiveChart.data.datasets[1].data.push(d.hum);
         
         const tr = tbody.insertRow(-1);
-        const lightColor = d.light ? '#eab308' : '#64748b';
-        const lightText = d.light ? '☀️ Priame' : '🌑 Tieň';
-        tr.innerHTML = `<td>${d.timestamp}</td><td>${parseFloat(d.temp).toFixed(1)}</td><td>${parseFloat(d.hum).toFixed(1)}</td><td style="color:${lightColor}; font-weight:600; font-size:0.78rem">${lightText}</td>`;
+        const lv = getLightLevel(d.light, d.light_val);
+        tr.innerHTML = `<td>${timeOnly}</td><td>${parseFloat(d.temp).toFixed(1)} °C</td><td>${parseFloat(d.hum).toFixed(1)} %</td><td style="color:${lv.color}; font-weight:600; font-size:0.78rem">${lv.text}</td>`;
     });
     
     archiveChart.update();

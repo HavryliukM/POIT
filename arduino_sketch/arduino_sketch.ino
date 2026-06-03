@@ -1,12 +1,12 @@
 #include <DHT.h>
 #include <IRremote.h> // Používa štandardnú knižnicu IRremote
 
-// Definícia pinov na ESP32 (Číslo GPIO zodpovedá označeniu D na väčšine NodeMCU dosiek)
-#define DHTPIN 23        // Pin pre DHT11 dáta -> zapoj na doske na pin D23
+// Definícia pinov na ESP32
+#define DHTPIN 23        // Pin pre DHT11 dáta
 #define DHTTYPE DHT11    // Typ senzora: DHT11
-#define IRPIN 19         // Vstup pre IR prekážkový senzor -> zapoj na doske na pin D19
-#define LDRPIN 34        // Vstup pre LDR fotoodpor -> zapoj na doske na pin D34 (alebo VP / P34)
-#define IR_RECV_PIN 18   // Vstup pre IR prijímač -> zapoj na doske na pin D18
+#define IRPIN 19         // Vstup pre IR prekážkový senzor
+#define LDRPIN 34        // Vstup pre LDR fotoodpor
+#define IR_RECV_PIN 18   // Vstup pre IR prijímač
 
 DHT dht(DHTPIN, DHTTYPE);
 
@@ -14,17 +14,16 @@ bool isMeasuring = false;
 int lastIrState = HIGH;
 
 unsigned long lastDebounceTime = 0;
-unsigned long debounceDelay = 250; // Ochraná lehota pre prekážkový senzor
+unsigned long debounceDelay = 250; // Ochranná lehota
 
 unsigned long lastMeasurementTime = 0;
-unsigned long measurementInterval = 1000; // Interval merania (1 sekunda)
+unsigned long measurementInterval = 1000; // Interval merania
 
-// Prahová hodnota pre detekciu priameho svetla (0 - 4095 na 12-bit ADC ESP32)
-// Čím viac svetla dopadá na fotoodpor v zapojení s 10k pull-down odporom, tým je hodnota bližšia k 4095.
-const int LIGHT_THRESHOLD = 2200; 
+unsigned long lastLightCheckTime = 0;
+const unsigned long LIGHT_CHECK_INTERVAL = 2000; // Kontrola svetla
 
 void setup() {
-  Serial.begin(9600); // Inicializácia sériového spojenia s Python backendom
+  Serial.begin(9600); // Sériové spojenie s Pythonom
   dht.begin();
   
   pinMode(IRPIN, INPUT);
@@ -38,7 +37,7 @@ void setup() {
 }
 
 void loop() {
-  // 0. Kontrola prichádzajúcich príkazov z Pythonu cez Serial
+  // 0. Príkazy z Pythonu
   if (Serial.available() > 0) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
@@ -57,15 +56,15 @@ void loop() {
     }
   }
 
-  // 1. Kontrola IR prekážkového senzora (mávnutie rukou na štart/stop)
+  // 1. Kontrola IR prekážkového senzora
   int irState = digitalRead(IRPIN);
   
-  // Prekážkový senzor vracia LOW pri detekcii ruky/prekážky
+  // LOW = detekcia prekážky
   if (irState == LOW && lastIrState == HIGH && (millis() - lastDebounceTime) > debounceDelay) {
     isMeasuring = !isMeasuring;
     lastDebounceTime = millis();
     
-    // Oznámenie stavu cez sériovú linku
+    // Oznámenie stavu
     if (isMeasuring) {
       Serial.println("{\"action\": \"start\", \"trigger\": \"IR prekážkový senzor\"}");
     } else {
@@ -74,10 +73,9 @@ void loop() {
   }
   lastIrState = irState;
 
-  // 2. Kontrola signálu z IR prijímača (ovládanie telefónom / ovládačom)
+  // 2. Kontrola signálu z IR prijímača
   if (IrReceiver.decode()) {
-    // Ak dostaneme akýkoľvek platný IR signál (alebo špecifické tlačidlo)
-    // Prepne stav snímania (štart / stop)
+    // Prepne stav merania po prijatí kódu
     if ((millis() - lastDebounceTime) > debounceDelay) {
       isMeasuring = !isMeasuring;
       lastDebounceTime = millis();
@@ -88,7 +86,7 @@ void loop() {
         Serial.println("{\"action\": \"stop\", \"trigger\": \"IR diaľkový ovládač\"}");
       }
     }
-    IrReceiver.resume(); // Pripraví prijímač na ďalší kód
+    IrReceiver.resume(); // Ďalší kód
   }
 
   // 3. Meranie teploty, vlhkosti a svetla
@@ -99,22 +97,30 @@ void loop() {
       float h = dht.readHumidity();
       float t = dht.readTemperature();
       int lightVal = analogRead(LDRPIN);
-      int directLight = (lightVal >= LIGHT_THRESHOLD) ? 1 : 0;
 
-      // Odoslanie kompletného JSONu cez Serial
+      // Odoslanie JSON dát
       if (!isnan(h) && !isnan(t)) {
         Serial.print("{\"temp\": ");
         Serial.print(t);
         Serial.print(", \"hum\": ");
         Serial.print(h);
-        Serial.print(", \"light\": ");
-        Serial.print(directLight);
         Serial.print(", \"light_val\": ");
         Serial.print(lightVal);
         Serial.println("}");
       } else {
         Serial.println("{\"error\": \"Failed to read from DHT sensor!\"}");
       }
+    }
+  }
+
+  // 4. Sledovanie svetla pri zastavenom meraní
+  if (!isMeasuring) {
+    if (millis() - lastLightCheckTime > LIGHT_CHECK_INTERVAL) {
+      lastLightCheckTime = millis();
+      int lightVal = analogRead(LDRPIN);
+      Serial.print("{\"light_val\": ");
+      Serial.print(lightVal);
+      Serial.println("}");
     }
   }
 }

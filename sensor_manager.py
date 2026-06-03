@@ -9,6 +9,11 @@ from datetime import datetime
 from models import SessionLocal, SensorReading, SavedSession
 
 
+# Auto-stop threshold: ≥3000 = "Priame svetlo" on the LDR scale
+LIGHT_STOP_THRESHOLD = 3000
+# Auto-resume threshold: drop below 2500 (hysteresis gap of 500 from stop threshold)
+LIGHT_RESUME_THRESHOLD = 2500
+
 class SensorManager:
     """
     Manages sensor simulation or Arduino hardware integration.
@@ -29,6 +34,7 @@ class SensorManager:
         self._serial_lock = threading.Lock() # Lock to synchronize serial read/write
         self._csv_path = "archive.csv"
         self.session_buffer = []      # Buffer for current session
+        self._auto_stopped_by_light = False  # Flag: auto-stop was triggered by LDR
 
         self.serial_port = port
         self.baudrate = baudrate
@@ -109,7 +115,14 @@ class SensorManager:
             return {"status": "success", "message": "Monitoring already running."}
 
         self.running = True
-        self.session_buffer = [] # Clear buffer for new run
+        self._auto_stopped_by_light = False  # Reset light-stop flag
+
+        is_resume = (trigger == 'LDR obnovenie')
+        if not is_resume:
+            # Manual start: begin a new session (clear buffer)
+            self.session_buffer = []
+        # Auto-resume: buffer is preserved — session continues from where it stopped
+
         if self.simulation_mode:
             self._sim_thread = threading.Thread(target=self._simulator_worker, daemon=True)
             self._sim_thread.start()
@@ -122,9 +135,10 @@ class SensorManager:
                         print("[Hardware] Sent start command to ESP32")
                     except Exception as e:
                         print(f"[Hardware] Write error: {e}")
-            
-        self._broadcast_status("start", "Monitoring started.", trigger)
-        return {"status": "success", "message": "Monitoring started."}
+
+        msg = "Meranie obnovené (svetlo kleslo)." if is_resume else "Monitoring started."
+        self._broadcast_status("start", msg, trigger)
+        return {"status": "success", "message": msg}
 
     def stop_monitoring(self, trigger=None):
         if not self.running:
@@ -139,6 +153,12 @@ class SensorManager:
                         print("[Hardware] Sent stop command to ESP32")
                     except Exception as e:
                         print(f"[Hardware] Write error: {e}")
+        # If stopped by high light, set flag and start watcher (sim mode only)
+        if trigger == 'Priame svetlo (LDR)':
+            self._auto_stopped_by_light = True
+            if self.simulation_mode:
+                t = threading.Thread(target=self._light_watcher_worker, daemon=True)
+                t.start()
         self._broadcast_status("stop", "Monitoring stopped.", trigger)
         return {"status": "success", "message": "Monitoring stopped."}
 
@@ -166,8 +186,17 @@ class SensorManager:
         if temp == 0.0 or hum == 0.0 or temp > 60.0 or temp < -10.0 or hum > 100.0 or hum < 0.0:
             return
 
-        # Print to server terminal like Arduino serial port
-        print(f'{{"temp": {temp:.2f}, "hum": {hum:.2f}, "light": {light}, "light_val": {light_val}}}', flush=True)
+        # Derive light binary from light_val (ignore the Arduino-sent `light` field)
+        light = 1 if light_val >= 2200 else 0
+
+        # Print to server terminal (light_val is enough — light is derived)
+        print(f'{{"temp": {temp:.2f}, "hum": {hum:.2f}, "light_val": {light_val}}}', flush=True)
+
+        # Auto-stop when light is too high (Priame svetlo)
+        if light_val >= LIGHT_STOP_THRESHOLD and self.running:
+            print(f'[Auto-stop] Priame svetlo detekov\u00e9 (LDR={light_val} >= {LIGHT_STOP_THRESHOLD}). Zastavujem meranie.', flush=True)
+            self.stop_monitoring(trigger='Priame svetlo (LDR)')
+            return  # Don't broadcast sensor_data after stopping
 
         if temp > self.target_temp + 0.5:
             self.actuator_state = 1
@@ -270,6 +299,18 @@ class SensorManager:
             self._process_data(temp, hum, light, light_val)
             time.sleep(self.interval)
 
+    def _light_watcher_worker(self):
+        """Simulation mode: watch LDR after auto-stop. Resume when light drops below threshold."""
+        print('[LDR Watcher] Sledujem intenzitu svetla (simūl\u00e1cia)...', flush=True)
+        while self.active and self._auto_stopped_by_light and self.simulation_mode:
+            light_val = random.randint(200, 3500)
+            print(f'[LDR Watcher] light_val={light_val}', flush=True)
+            if light_val < LIGHT_RESUME_THRESHOLD:
+                print(f'[Auto-resume] Svetlo kleslo (LDR={light_val} < {LIGHT_RESUME_THRESHOLD}). Obnova merania.', flush=True)
+                self.start_monitoring(trigger='LDR obnovenie')
+                break
+            time.sleep(2.0)
+
     def _serial_listener(self):
         with self._serial_lock:
             if self.arduino:
@@ -305,6 +346,13 @@ class SensorManager:
                             light = int(data.get("light", 0))
                             light_val = int(data.get("light_val", 0))
                             self._process_data(temp, hum, light, light_val)
+                        elif "light_val" in data and "temp" not in data:
+                            # Light-only packet from ESP32 when not measuring (auto-resume check)
+                            light_val = int(data["light_val"])
+                            print(f'[LDR Watcher] light_val={light_val}', flush=True)
+                            if self._auto_stopped_by_light and not self.running and light_val < LIGHT_RESUME_THRESHOLD:
+                                print(f'[Auto-resume] Svetlo kleslo (LDR={light_val} < {LIGHT_RESUME_THRESHOLD}). Obnova merania.', flush=True)
+                                self.start_monitoring(trigger='LDR obnovenie')
                     except json.JSONDecodeError:
                         pass # Ignore malformed json
                 else:
