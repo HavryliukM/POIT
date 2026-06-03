@@ -357,8 +357,133 @@ els.btnStart.onclick = () => send({ action: 'start' });
 els.btnStop.onclick  = () => send({ action: 'stop' });
 els.btnClose.onclick = () => send({ action: 'close' });
 els.btnSet.onclick   = () => send({ action: 'set_params', interval: parseFloat(els.interval.value) });
+// ─── Archive: Save to DB ───
+document.getElementById('btn-save-db').onclick = async () => {
+    const status = document.getElementById('db-status');
+    status.style.color = '#94a3b8';
+    status.textContent = 'Ukladám aktuálnu reláciu do DB...';
+    try {
+        const res = await fetch('/api/archive/save_db', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'success') {
+            status.style.color = '#10b981';
+            status.textContent = data.message;
+            log(data.message);
+        } else {
+            status.style.color = '#ef4444';
+            status.textContent = data.message;
+        }
+    } catch (e) {
+        status.style.color = '#ef4444';
+        status.textContent = 'Chyba: ' + e.message;
+    }
+};
+
+// ─── Archive: Save to CSV ───
+document.getElementById('btn-save-csv').onclick = async () => {
+    const status = document.getElementById('csv-status');
+    status.style.color = '#94a3b8';
+    status.textContent = 'Ukladám aktuálnu reláciu do CSV...';
+    try {
+        const res = await fetch('/api/archive/save_csv', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'success') {
+            status.style.color = '#10b981';
+            status.textContent = data.message;
+            log(data.message);
+        } else {
+            status.style.color = '#ef4444';
+            status.textContent = data.message;
+        }
+    } catch (e) {
+        status.style.color = '#ef4444';
+        status.textContent = 'Chyba: ' + e.message;
+    }
+};
+
+// ─── Archive: Load from DB ───
+document.getElementById('btn-load-db').onclick = async () => {
+    const limit   = parseInt(document.getElementById('db-limit').value) || 50;
+    const status  = document.getElementById('db-status');
+    status.style.color = '#94a3b8';
+    status.textContent = 'Načítavam z databázy…';
+
+    let url = `/api/history/db?limit=${limit}`;
+
+    try {
+        const res  = await fetch(url);
+        const data = await res.json();
+        if (!data.length) { status.textContent = 'Žiadne záznamy.'; return; }
+
+        // Clear chart + table, then display
+        const sorted = [...data].reverse();
+        chart.data.labels = [];
+        chart.data.datasets[0].data = [];
+        chart.data.datasets[1].data = [];
+        els.historyBody.innerHTML = '';
+
+        sorted.forEach(d => {
+            addChartPoint(d.timestamp.split(' ')[1], d.temp, d.hum);
+            addHistoryRow(d.timestamp, d.temp, d.hum, d.light);
+        });
+
+        // Update gauges to latest value
+        const latest = data[0];
+        setGauge(els.tempArc, els.tempVal, els.tempBadge, latest.temp, 0, 50, '°C');
+        setGauge(els.humArc,  els.humVal,  els.humBadge,  latest.hum,  0, 100, '%');
+        els.lastUpdate.textContent = latest.timestamp;
+        updateLight(latest.light, latest.light_val);
+
+        status.style.color = '#10b981';
+        status.textContent = `✓ Načítaných ${data.length} záznamov z DB`;
+        log(`Arch. DB: načítaných ${data.length} záznamov`);
+    } catch (e) {
+        status.style.color = '#ef4444';
+        status.textContent = 'Chyba: ' + e.message;
+    }
+};
+
+// ─── Archive: Load from CSV ───
+document.getElementById('btn-load-csv').onclick = async () => {
+    const limit  = parseInt(document.getElementById('csv-limit').value) || 50;
+    const status = document.getElementById('csv-status');
+    status.style.color = '#94a3b8';
+    status.textContent = 'Načítavam z CSV súboru…';
+
+    try {
+        const res  = await fetch(`/api/history/csv?limit=${limit}`);
+        const data = await res.json();
+        if (!data.length) { status.textContent = 'CSV súbor je prázdny.'; return; }
+
+        // Clear chart + table, then display
+        chart.data.labels = [];
+        chart.data.datasets[0].data = [];
+        chart.data.datasets[1].data = [];
+        els.historyBody.innerHTML = '';
+
+        data.forEach(d => {
+            addChartPoint(d.timestamp.split(' ')[1], d.temp, d.hum);
+            addHistoryRow(d.timestamp, d.temp, d.hum, d.light);
+        });
+
+        // Update gauges to latest value
+        const latest = data[data.length - 1];
+        setGauge(els.tempArc, els.tempVal, els.tempBadge, latest.temp, 0, 50, '°C');
+        setGauge(els.humArc,  els.humVal,  els.humBadge,  latest.hum,  0, 100, '%');
+        els.lastUpdate.textContent = latest.timestamp;
+        updateLight(latest.light, latest.light_val);
+
+        status.style.color = '#10b981';
+        status.textContent = `✓ Načítaných ${data.length} riadkov z archive.csv`;
+        log(`Arch. CSV: načítaných ${data.length} riadkov`);
+    } catch (e) {
+        status.style.color = '#ef4444';
+        status.textContent = 'Chyba: ' + e.message;
+    }
+};
 
 // ─── Init ───
 syncUI(false);
 connect();
 loadHistory();
+

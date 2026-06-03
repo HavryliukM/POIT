@@ -28,6 +28,59 @@ async def get_history():
     return JSONResponse(content=data)
 
 
+@app.get("/api/history/db")
+async def get_history_db(limit: int = 50, from_date: str = None):
+    """Load archived data from SQLite DB with optional date filter."""
+    from datetime import datetime
+    db = SessionLocal()
+    query = db.query(SensorReading).order_by(SensorReading.timestamp.desc())
+    if from_date:
+        try:
+            dt = datetime.strptime(from_date, "%Y-%m-%d")
+            query = query.filter(SensorReading.timestamp >= dt)
+        except ValueError:
+            pass
+    readings = query.limit(max(1, min(limit, 500))).all()
+    data = [r.to_dict() for r in readings]
+    db.close()
+    return JSONResponse(content=data)
+
+
+@app.get("/api/history/csv")
+async def get_history_csv(limit: int = 50):
+    """Load archived data from CSV file."""
+    import csv as csv_mod, os
+    csv_path = "archive.csv"
+    if not os.path.exists(csv_path):
+        return JSONResponse(content=[])
+    rows = []
+    with open(csv_path, "r", newline="", encoding="utf-8") as f:
+        reader = csv_mod.DictReader(f)
+        for row in reader:
+            try:
+                rows.append({
+                    "timestamp": row.get("timestamp", ""),
+                    "temp":      float(row.get("temp", 0)),
+                    "hum":       float(row.get("hum", 0)),
+                    "light":     int(float(row.get("light", 0))),
+                    "light_val": int(float(row.get("light_val", 0))),
+                })
+            except (ValueError, KeyError):
+                continue
+    # Return last N rows
+    limit = max(1, min(limit, 500))
+    return JSONResponse(content=rows[-limit:])
+@app.post("/api/archive/save_db")
+async def save_archive_db():
+    res = sensor_manager.save_to_db()
+    return JSONResponse(content=res)
+
+
+@app.post("/api/archive/save_csv")
+async def save_archive_csv():
+    res = sensor_manager.save_to_csv()
+    return JSONResponse(content=res)
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()

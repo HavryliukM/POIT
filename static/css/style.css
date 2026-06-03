@@ -397,6 +397,83 @@ td:nth-child(3) { color: var(--hum); font-weight: 500; }
     gap: 1.25rem;
 }
 
+/* ─── Archive Panel ─── */
+.archive-card { margin-top: 0; }
+
+.archive-controls-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+}
+
+.archive-section {
+    background: rgba(0,0,0,0.2);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+}
+
+.archive-section-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin-bottom: 0.85rem;
+}
+
+.archive-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.archive-form label {
+    font-size: 0.76rem;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.archive-form input[type="number"],
+.archive-form input[type="date"] {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 0.35rem 0.6rem;
+    color: white;
+    font-family: inherit;
+    font-size: 0.82rem;
+    width: 80px;
+}
+
+.archive-form input[type="date"] { width: 140px; }
+
+.archive-form input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.archive-status {
+    font-size: 0.72rem;
+    color: var(--ok);
+    font-style: italic;
+    flex-basis: 100%;
+    min-height: 1rem;
+}
+
+.btn--accent {
+    background: rgba(99,102,241,0.18);
+    color: var(--accent2);
+    border: 1px solid rgba(99,102,241,0.35);
+}
+.btn--accent:not(:disabled):hover {
+    background: rgba(99,102,241,0.32);
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(99,102,241,0.25);
+}
+
 /* ─── Responsive ─── */
 @media (max-width: 1024px) {
     .top-row { grid-template-columns: 1fr 1fr; }
@@ -406,6 +483,7 @@ td:nth-child(3) { color: var(--hum); font-weight: 500; }
     .info-item { width: 48%; }
     .controls-row { grid-template-columns: 1fr; }
     .bottom-row { grid-template-columns: 1fr; }
+    .archive-controls-row { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 640px) {

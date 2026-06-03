@@ -26,7 +26,9 @@ class SensorManager:
         self._serial_thread = None
         self._clients = {}            
         self._lock = threading.Lock()
+        self._serial_lock = threading.Lock() # Lock to synchronize serial read/write
         self._csv_path = "archive.csv"
+        self.session_buffer = []      # Buffer for current session
 
         self.serial_port = port
         self.baudrate = baudrate
@@ -38,16 +40,19 @@ class SensorManager:
                 csv.writer(f).writerow(["timestamp", "temp", "hum", "target_temp", "actuator", "light", "light_val", "state"])
 
     def _try_connect_arduino(self):
-        if self.arduino and self.arduino.is_open:
-            return
-        try:
-            self.arduino = serial.Serial(self.serial_port, self.baudrate, timeout=1)
-            time.sleep(2) # Arduino auto-reset delay
-            self.simulation_mode = False
-            print(f"[Hardware] Connected to Arduino on {self.serial_port}")
-        except Exception as e:
-            self.simulation_mode = True
-            print(f"[Hardware] Failed to connect to Arduino on {self.serial_port}. Using simulation mode.")
+        with self._serial_lock:
+            if self.arduino and self.arduino.is_open:
+                return
+            try:
+                self.arduino = serial.Serial(self.serial_port, self.baudrate, timeout=1)
+                self.arduino.dtr = False
+                self.arduino.rts = False
+                time.sleep(2) # Arduino auto-reset delay
+                self.simulation_mode = False
+                print(f"[Hardware] Connected to Arduino on {self.serial_port}")
+            except Exception as e:
+                self.simulation_mode = True
+                print(f"[Hardware] Failed to connect to Arduino on {self.serial_port}. Using simulation mode.")
 
     def add_client(self, loop, queue):
         with self._lock:
@@ -91,8 +96,9 @@ class SensorManager:
     def close_system(self):
         self.stop_monitoring()
         self.active = False
-        if self.arduino and self.arduino.is_open:
-            self.arduino.close()
+        with self._serial_lock:
+            if self.arduino and self.arduino.is_open:
+                self.arduino.close()
         self._broadcast_status("close", "System deactivated.")
         return {"status": "success", "message": "System deactivated."}
 
@@ -103,16 +109,19 @@ class SensorManager:
             return {"status": "success", "message": "Monitoring already running."}
 
         self.running = True
+        self.session_buffer = [] # Clear buffer for new run
         if self.simulation_mode:
             self._sim_thread = threading.Thread(target=self._simulator_worker, daemon=True)
             self._sim_thread.start()
         else:
-            if self.arduino and self.arduino.is_open:
-                try:
-                    self.arduino.write(b"start\n")
-                    print("[Hardware] Sent start command to ESP32")
-                except Exception as e:
-                    print(f"[Hardware] Write error: {e}")
+            with self._serial_lock:
+                if self.arduino and self.arduino.is_open:
+                    try:
+                        self.arduino.write(b"start\n")
+                        self.arduino.flush()
+                        print("[Hardware] Sent start command to ESP32")
+                    except Exception as e:
+                        print(f"[Hardware] Write error: {e}")
             
         self._broadcast_status("start", "Monitoring started.", trigger)
         return {"status": "success", "message": "Monitoring started."}
@@ -121,12 +130,15 @@ class SensorManager:
         if not self.running:
             return {"status": "success", "message": "Monitoring already stopped."}
         self.running = False
-        if not self.simulation_mode and self.arduino and self.arduino.is_open:
-            try:
-                self.arduino.write(b"stop\n")
-                print("[Hardware] Sent stop command to ESP32")
-            except Exception as e:
-                print(f"[Hardware] Write error: {e}")
+        if not self.simulation_mode:
+            with self._serial_lock:
+                if self.arduino and self.arduino.is_open:
+                    try:
+                        self.arduino.write(b"stop\n")
+                        self.arduino.flush()
+                        print("[Hardware] Sent stop command to ESP32")
+                    except Exception as e:
+                        print(f"[Hardware] Write error: {e}")
         self._broadcast_status("stop", "Monitoring stopped.", trigger)
         return {"status": "success", "message": "Monitoring stopped."}
 
@@ -140,6 +152,13 @@ class SensorManager:
 
     def _process_data(self, temp, hum, light=0, light_val=0):
         """Regulation loop, archival and broadcasting"""
+        # Ignore nonsense/invalid data
+        if temp == 0.0 or hum == 0.0 or temp > 60.0 or temp < -10.0 or hum > 100.0 or hum < 0.0:
+            return
+
+        # Print to server terminal like Arduino serial port
+        print(f'{{"temp": {temp:.2f}, "hum": {hum:.2f}, "light": {light}, "light_val": {light_val}}}', flush=True)
+
         if temp > self.target_temp + 0.5:
             self.actuator_state = 1
         elif temp < self.target_temp - 0.5:
@@ -159,32 +178,17 @@ class SensorManager:
             }
         }
 
-        # --- Archive to DB ---
-        try:
-            db = SessionLocal()
-            db.add(SensorReading(
-                temp=temp, hum=hum, 
-                target_temp=self.target_temp, 
-                actuator=self.actuator_state,
-                light=light,
-                light_val=light_val,
-                state="RUNNING", timestamp=now
-            ))
-            db.commit()
-        except Exception as e:
-            print(f"[DB Error] {e}")
-        finally:
-            try:
-                db.close()
-            except:
-                pass
-
-        # --- Archive to CSV ---
-        try:
-            with open(self._csv_path, "a", newline="") as f:
-                csv.writer(f).writerow([ts, temp, hum, self.target_temp, self.actuator_state, light, light_val, "RUNNING"])
-        except Exception as e:
-            print(f"[CSV Error] {e}")
+        # --- Buffer for manual save ---
+        self.session_buffer.append({
+            "temp": temp,
+            "hum": hum,
+            "target_temp": self.target_temp,
+            "actuator": self.actuator_state,
+            "light": light,
+            "light_val": light_val,
+            "state": "RUNNING",
+            "timestamp": now
+        })
 
         # --- Broadcast ---
         with self._lock:
@@ -196,6 +200,46 @@ class SensorManager:
             except:
                 pass
 
+    def save_to_db(self):
+        if not self.session_buffer:
+            return {"status": "error", "message": "Žiadne nové dáta na uloženie do DB."}
+        
+        try:
+            db = SessionLocal()
+            for r in self.session_buffer:
+                db.add(SensorReading(
+                    temp=r["temp"],
+                    hum=r["hum"],
+                    target_temp=r["target_temp"],
+                    actuator=r["actuator"],
+                    light=r["light"],
+                    light_val=r["light_val"],
+                    state=r["state"],
+                    timestamp=r["timestamp"]
+                ))
+            db.commit()
+            db.close()
+            return {"status": "success", "message": f"Uložených {len(self.session_buffer)} záznamov do databázy."}
+        except Exception as e:
+            return {"status": "error", "message": f"Chyba pri ukladaní do DB: {e}"}
+
+    def save_to_csv(self):
+        if not self.session_buffer:
+            return {"status": "error", "message": "Žiadne nové dáta na uloženie do CSV."}
+        
+        try:
+            with open(self._csv_path, "a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                for r in self.session_buffer:
+                    ts_str = r["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+                    writer.writerow([
+                        ts_str, r["temp"], r["hum"], r["target_temp"],
+                        r["actuator"], r["light"], r["light_val"], r["state"]
+                    ])
+            return {"status": "success", "message": f"Uložených {len(self.session_buffer)} riadkov do archive.csv."}
+        except Exception as e:
+            return {"status": "error", "message": f"Chyba pri ukladaní do CSV: {e}"}
+
     def _simulator_worker(self):
         while self.running and self.simulation_mode:
             temp = round(random.uniform(20.0, 30.0), 2)
@@ -206,40 +250,42 @@ class SensorManager:
             time.sleep(self.interval)
 
     def _serial_listener(self):
-        if self.arduino:
-            self.arduino.reset_input_buffer()
+        with self._serial_lock:
+            if self.arduino:
+                try:
+                    self.arduino.reset_input_buffer()
+                except Exception as e:
+                    print(f"[Hardware] Failed to reset input buffer: {e}")
             
         while self.active and not self.simulation_mode:
             try:
-                if self.arduino and self.arduino.in_waiting > 0:
-                    line = self.arduino.readline().decode('utf-8', errors='ignore').strip()
-                    if line:
-                        try:
-                            data = json.loads(line)
-                            if "action" in data:
-                                action = data.get("action", "")
-                                trigger = data.get("trigger", "IR prekážkový senzor")
-                                if action == "start" and not self.running:
-                                    print(f"[Hardware] Triggered START by {trigger}")
-                                    self.start_monitoring(trigger)
-                                elif action == "stop" and self.running:
-                                    print(f"[Hardware] Triggered STOP by {trigger}")
-                                    self.stop_monitoring(trigger)
-                            elif "temp" in data and "hum" in data and self.running:
-                                temp = float(data["temp"])
-                                hum = float(data["hum"])
-                                light = int(data.get("light", 0))
-                                light_val = int(data.get("light_val", 0))
-                                self._process_data(temp, hum, light, light_val)
-                        except json.JSONDecodeError:
-                            pass # Ignore malformed json
+                line = None
+                with self._serial_lock:
+                    if self.arduino and self.arduino.is_open and self.arduino.in_waiting > 0:
+                        line = self.arduino.readline().decode('utf-8', errors='ignore').strip()
+                
+                if line:
+                    try:
+                        data = json.loads(line)
+                        if "action" in data:
+                            action = data.get("action", "")
+                            trigger = data.get("trigger", "IR prekážkový senzor")
+                            if action == "start" and not self.running:
+                                print(f"[Hardware] Triggered START by {trigger}")
+                                self.start_monitoring(trigger)
+                            elif action == "stop" and self.running:
+                                print(f"[Hardware] Triggered STOP by {trigger}")
+                                self.stop_monitoring(trigger)
+                        elif "temp" in data and "hum" in data and self.running:
+                            temp = float(data["temp"])
+                            hum = float(data["hum"])
+                            light = int(data.get("light", 0))
+                            light_val = int(data.get("light_val", 0))
+                            self._process_data(temp, hum, light, light_val)
+                    except json.JSONDecodeError:
+                        pass # Ignore malformed json
                 else:
                     time.sleep(0.05)
             except Exception as e:
                 print(f"[Hardware] Serial read error: {e}")
-                self.simulation_mode = True
-                # If we lose connection, fallback to simulation if still running
-                if self.running:
-                    self._sim_thread = threading.Thread(target=self._simulator_worker, daemon=True)
-                    self._sim_thread.start()
                 break
