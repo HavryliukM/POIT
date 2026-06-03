@@ -35,4 +35,19 @@ class SensorReading(Base):
         }
 
 
+class SavedSession(Base):
+    __tablename__ = "saved_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    data = Column(String, nullable=False) # JSON data of the session
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "timestamp": self.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            "data": self.data
+        }
+
+
 Base.metadata.create_all(bind=engine)

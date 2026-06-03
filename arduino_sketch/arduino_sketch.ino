@@ -48,6 +48,12 @@ void loop() {
     } else if (cmd == "stop") {
       isMeasuring = false;
       Serial.println("{\"action\": \"stop\", \"trigger\": \"Web UI\"}");
+    } else if (cmd.startsWith("interval:")) {
+      String msStr = cmd.substring(9);
+      long newInterval = msStr.toInt();
+      if (newInterval >= 500) {
+        measurementInterval = newInterval;
+      }
     }
   }
 

@@ -191,6 +191,91 @@ const chart = new Chart(document.getElementById('main-chart').getContext('2d'), 
     },
 });
 
+// ─── Archive Chart.js (Separate instance for loaded runs) ───
+const archiveChart = new Chart(document.getElementById('archive-chart').getContext('2d'), {
+    type: 'line',
+    data: {
+        labels: [],
+        datasets: [
+            {
+                label: 'Teplota (°C)',
+                data: [],
+                borderColor: '#f97316',
+                backgroundColor: 'rgba(249,115,22,0.08)',
+                fill: true,
+                tension: 0.35,
+                pointRadius: 2,
+                borderWidth: 2,
+                yAxisID: 'yTemp',
+            },
+            {
+                label: 'Vlhkosť (%)',
+                data: [],
+                borderColor: '#38bdf8',
+                backgroundColor: 'rgba(56,189,248,0.08)',
+                fill: true,
+                tension: 0.35,
+                pointRadius: 2,
+                borderWidth: 2,
+                yAxisID: 'yHum',
+            },
+        ],
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 400 },
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+            legend: {
+                labels: {
+                    color: '#94a3b8',
+                    font: { family: "'Outfit', sans-serif", size: 11 },
+                    boxWidth: 10,
+                    boxHeight: 10,
+                    usePointStyle: true,
+                    pointStyle: 'circle',
+                }
+            }
+        },
+        scales: {
+            x: {
+                grid: { color: 'rgba(255,255,255,0.04)' },
+                ticks: {
+                    color: '#475569',
+                    maxTicksLimit: 8,
+                    font: { family: "'Outfit', sans-serif", size: 10 },
+                },
+                border: { color: 'rgba(255,255,255,0.06)' },
+            },
+            yTemp: {
+                position: 'left',
+                grid: { color: 'rgba(255,255,255,0.04)' },
+                border: { color: 'rgba(255,255,255,0.06)' },
+                ticks: {
+                    color: '#f97316',
+                    font: { family: "'Outfit', sans-serif", size: 10 },
+                    callback: v => v.toFixed(0) + ' °C',
+                },
+                suggestedMin: 15,
+                suggestedMax: 40,
+            },
+            yHum: {
+                position: 'right',
+                grid: { drawOnChartArea: false },
+                border: { color: 'rgba(255,255,255,0.06)' },
+                ticks: {
+                    color: '#38bdf8',
+                    font: { family: "'Outfit', sans-serif", size: 10 },
+                    callback: v => v.toFixed(0) + ' %',
+                },
+                suggestedMin: 20,
+                suggestedMax: 80,
+            },
+        },
+    },
+});
+
 function addChartPoint(label, temp, hum) {
     if (chart.data.labels.length >= MAX_CHART_POINTS) {
         chart.data.labels.shift();
@@ -357,6 +442,37 @@ els.btnStart.onclick = () => send({ action: 'start' });
 els.btnStop.onclick  = () => send({ action: 'stop' });
 els.btnClose.onclick = () => send({ action: 'close' });
 els.btnSet.onclick   = () => send({ action: 'set_params', interval: parseFloat(els.interval.value) });
+els.interval.onchange = () => send({ action: 'set_params', interval: parseFloat(els.interval.value) });
+els.interval.oninput  = () => send({ action: 'set_params', interval: parseFloat(els.interval.value) });
+// ─── Update CSV Dropdown ───
+async function updateCsvDropdown(selectToValue) {
+    const select = document.getElementById('csv-filename');
+    if (!select) return;
+    try {
+        const res = await fetch('/api/archive/list_csv');
+        const files = await res.json();
+        select.innerHTML = '';
+        if (files.length === 0) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'Žiadne súbory';
+            select.appendChild(opt);
+            return;
+        }
+        files.forEach(f => {
+            const opt = document.createElement('option');
+            opt.value = f;
+            opt.textContent = f;
+            select.appendChild(opt);
+        });
+        if (selectToValue) {
+            select.value = selectToValue;
+        }
+    } catch (e) {
+        console.error('Chyba pri načítaní zoznamu CSV:', e);
+    }
+}
+
 // ─── Archive: Save to DB ───
 document.getElementById('btn-save-db').onclick = async () => {
     const status = document.getElementById('db-status');
@@ -369,6 +485,11 @@ document.getElementById('btn-save-db').onclick = async () => {
             status.style.color = '#10b981';
             status.textContent = data.message;
             log(data.message);
+            // Auto-fill the load input with the newly saved ID
+            const match = data.message.match(/pod ID: (\d+)/);
+            if (match) {
+                document.getElementById('db-session-id').value = match[1];
+            }
         } else {
             status.style.color = '#ef4444';
             status.textContent = data.message;
@@ -391,6 +512,13 @@ document.getElementById('btn-save-csv').onclick = async () => {
             status.style.color = '#10b981';
             status.textContent = data.message;
             log(data.message);
+            // Auto-fill the load input with the newly saved filename
+            const match = data.message.match(/súboru: (archive_session_[^\s]+)/);
+            if (match) {
+                await updateCsvDropdown(match[1]);
+            } else {
+                await updateCsvDropdown();
+            }
         } else {
             status.style.color = '#ef4444';
             status.textContent = data.message;
@@ -401,42 +529,57 @@ document.getElementById('btn-save-csv').onclick = async () => {
     }
 };
 
+// ─── Helper to render Archive Data ───
+function displayArchiveData(data) {
+    // Clear archive chart
+    archiveChart.data.labels = [];
+    archiveChart.data.datasets[0].data = [];
+    archiveChart.data.datasets[1].data = [];
+    
+    // Clear archive table
+    const tbody = document.getElementById('archive-body');
+    tbody.innerHTML = '';
+    
+    // Fill data
+    data.forEach(d => {
+        const label = d.timestamp.split(' ')[1] || d.timestamp;
+        archiveChart.data.labels.push(label);
+        archiveChart.data.datasets[0].data.push(d.temp);
+        archiveChart.data.datasets[1].data.push(d.hum);
+        
+        const tr = tbody.insertRow(-1);
+        const lightColor = d.light ? '#eab308' : '#64748b';
+        const lightText = d.light ? '☀️ Priame' : '🌑 Tieň';
+        tr.innerHTML = `<td>${d.timestamp}</td><td>${parseFloat(d.temp).toFixed(1)}</td><td>${parseFloat(d.hum).toFixed(1)}</td><td style="color:${lightColor}; font-weight:600; font-size:0.78rem">${lightText}</td>`;
+    });
+    
+    archiveChart.update();
+}
+
 // ─── Archive: Load from DB ───
 document.getElementById('btn-load-db').onclick = async () => {
-    const limit   = parseInt(document.getElementById('db-limit').value) || 50;
-    const status  = document.getElementById('db-status');
+    const id = parseInt(document.getElementById('db-session-id').value) || 1;
+    const status = document.getElementById('db-status');
     status.style.color = '#94a3b8';
-    status.textContent = 'Načítavam z databázy…';
-
-    let url = `/api/history/db?limit=${limit}`;
+    status.textContent = `Načítavam reláciu ID: ${id}…`;
 
     try {
-        const res  = await fetch(url);
+        const res = await fetch(`/api/archive/load_db?id=${id}`);
+        if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.message || 'Nepodarilo sa načítať reláciu.');
+        }
         const data = await res.json();
-        if (!data.length) { status.textContent = 'Žiadne záznamy.'; return; }
+        if (!data || !data.length) {
+            status.textContent = 'Relácia je prázdna.';
+            return;
+        }
 
-        // Clear chart + table, then display
-        const sorted = [...data].reverse();
-        chart.data.labels = [];
-        chart.data.datasets[0].data = [];
-        chart.data.datasets[1].data = [];
-        els.historyBody.innerHTML = '';
-
-        sorted.forEach(d => {
-            addChartPoint(d.timestamp.split(' ')[1], d.temp, d.hum);
-            addHistoryRow(d.timestamp, d.temp, d.hum, d.light);
-        });
-
-        // Update gauges to latest value
-        const latest = data[0];
-        setGauge(els.tempArc, els.tempVal, els.tempBadge, latest.temp, 0, 50, '°C');
-        setGauge(els.humArc,  els.humVal,  els.humBadge,  latest.hum,  0, 100, '%');
-        els.lastUpdate.textContent = latest.timestamp;
-        updateLight(latest.light, latest.light_val);
+        displayArchiveData(data);
 
         status.style.color = '#10b981';
-        status.textContent = `✓ Načítaných ${data.length} záznamov z DB`;
-        log(`Arch. DB: načítaných ${data.length} záznamov`);
+        status.textContent = `✓ Úspešne načítaná relácia ID: ${id} (${data.length} bodov)`;
+        log(`Načítaná relácia ID: ${id}`);
     } catch (e) {
         status.style.color = '#ef4444';
         status.textContent = 'Chyba: ' + e.message;
@@ -445,37 +588,35 @@ document.getElementById('btn-load-db').onclick = async () => {
 
 // ─── Archive: Load from CSV ───
 document.getElementById('btn-load-csv').onclick = async () => {
-    const limit  = parseInt(document.getElementById('csv-limit').value) || 50;
+    const filename = document.getElementById('csv-filename').value;
     const status = document.getElementById('csv-status');
+    
+    if (!filename) {
+        status.style.color = '#ef4444';
+        status.textContent = 'Chyba: Žiadny súbor nie je vybraný.';
+        return;
+    }
+    
     status.style.color = '#94a3b8';
-    status.textContent = 'Načítavam z CSV súboru…';
+    status.textContent = `Načítavam súbor: ${filename}…`;
 
     try {
-        const res  = await fetch(`/api/history/csv?limit=${limit}`);
+        const res = await fetch(`/api/archive/load_csv?file=${encodeURIComponent(filename)}`);
+        if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.message || 'Nepodarilo sa načítať súbor.');
+        }
         const data = await res.json();
-        if (!data.length) { status.textContent = 'CSV súbor je prázdny.'; return; }
+        if (!data || !data.length) {
+            status.textContent = 'Súbor je prázdny.';
+            return;
+        }
 
-        // Clear chart + table, then display
-        chart.data.labels = [];
-        chart.data.datasets[0].data = [];
-        chart.data.datasets[1].data = [];
-        els.historyBody.innerHTML = '';
-
-        data.forEach(d => {
-            addChartPoint(d.timestamp.split(' ')[1], d.temp, d.hum);
-            addHistoryRow(d.timestamp, d.temp, d.hum, d.light);
-        });
-
-        // Update gauges to latest value
-        const latest = data[data.length - 1];
-        setGauge(els.tempArc, els.tempVal, els.tempBadge, latest.temp, 0, 50, '°C');
-        setGauge(els.humArc,  els.humVal,  els.humBadge,  latest.hum,  0, 100, '%');
-        els.lastUpdate.textContent = latest.timestamp;
-        updateLight(latest.light, latest.light_val);
+        displayArchiveData(data);
 
         status.style.color = '#10b981';
-        status.textContent = `✓ Načítaných ${data.length} riadkov z archive.csv`;
-        log(`Arch. CSV: načítaných ${data.length} riadkov`);
+        status.textContent = `✓ Úspešne načítaný súbor (${data.length} riadkov)`;
+        log(`Načítaný súbor: ${filename}`);
     } catch (e) {
         status.style.color = '#ef4444';
         status.textContent = 'Chyba: ' + e.message;
@@ -486,4 +627,5 @@ document.getElementById('btn-load-csv').onclick = async () => {
 syncUI(false);
 connect();
 loadHistory();
+updateCsvDropdown();
 

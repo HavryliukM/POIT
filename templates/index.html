@@ -242,8 +242,8 @@
                 <div class="archive-section-title">Databáza (SQLite)</div>
                 <div class="archive-form">
                     <div class="param-row">
-                        <label for="db-limit">Počet záznamov:</label>
-                        <input id="db-limit" type="number" value="50" min="1" max="500">
+                        <label for="db-session-id">ID relácie:</label>
+                        <input id="db-session-id" type="number" value="1" min="1">
                     </div>
                     <div class="btn-group" style="margin-top: 1rem; width: 100%;">
                         <button id="btn-save-db" class="btn btn--primary" style="flex: 1;">Uložiť do DB</button>
@@ -257,14 +257,39 @@
                 <div class="archive-section-title">Súbor (archive.csv)</div>
                 <div class="archive-form">
                     <div class="param-row">
-                        <label for="csv-limit">Počet riadkov:</label>
-                        <input id="csv-limit" type="number" value="50" min="1" max="500">
+                        <label for="csv-filename">Výber súboru:</label>
+                        <select id="csv-filename" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08); color: #fff; padding: 6px 10px; border-radius: 6px; flex: 1; outline: none; font-family: inherit; font-size: 0.85rem; min-width: 0;"></select>
                     </div>
                     <div class="btn-group" style="margin-top: 1rem; width: 100%;">
                         <button id="btn-save-csv" class="btn btn--primary" style="flex: 1;">Uložiť do CSV</button>
                         <button id="btn-load-csv" class="btn btn--accent" style="flex: 1;">Načítať z CSV</button>
                     </div>
                     <span class="archive-status" id="csv-status"></span>
+                </div>
+            </div>
+        </div>
+        <!-- Archive visualization row -->
+        <div class="archive-vis-row" style="margin-top: 1.5rem; display: grid; grid-template-columns: 1.6fr 1fr; gap: 1.25rem; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 1.5rem;">
+            <div class="card" style="margin: 0; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04);">
+                <div class="card-title" style="font-size: 0.9rem; text-transform: uppercase; color: #94a3b8;">Vizualizácia archívu</div>
+                <div class="chart-wrap" style="height: 250px;">
+                    <canvas id="archive-chart"></canvas>
+                </div>
+            </div>
+            <div class="card" style="margin: 0; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04);">
+                <div class="card-title" style="font-size: 0.9rem; text-transform: uppercase; color: #94a3b8;">Dáta archívu</div>
+                <div class="table-wrap" style="max-height: 250px;">
+                    <table id="archive-table-element">
+                        <thead>
+                            <tr>
+                                <th>Čas</th>
+                                <th>Teplota</th>
+                                <th>Vlhkosť</th>
+                                <th>Svetlo</th>
+                            </tr>
+                        </thead>
+                        <tbody id="archive-body"></tbody>
+                    </table>
                 </div>
             </div>
         </div>

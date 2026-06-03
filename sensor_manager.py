@@ -6,7 +6,7 @@ import os
 import json
 import serial
 from datetime import datetime
-from models import SessionLocal, SensorReading
+from models import SessionLocal, SensorReading, SavedSession
 
 
 class SensorManager:
@@ -144,6 +144,16 @@ class SensorManager:
 
     def set_interval(self, seconds: float):
         self.interval = max(0.5, float(seconds))
+        if not self.simulation_mode:
+            with self._serial_lock:
+                if self.arduino and self.arduino.is_open:
+                    try:
+                        ms = int(self.interval * 1000)
+                        self.arduino.write(f"interval:{ms}\n".encode())
+                        self.arduino.flush()
+                        print(f"[Hardware] Sent interval update to ESP32: {ms}ms")
+                    except Exception as e:
+                        print(f"[Hardware] Write error: {e}")
         return {"status": "success", "message": f"Refresh rate: {self.interval}s"}
 
     def set_target_temp(self, temp: float):
@@ -205,21 +215,27 @@ class SensorManager:
             return {"status": "error", "message": "Žiadne nové dáta na uloženie do DB."}
         
         try:
-            db = SessionLocal()
+            # Package session data into a JSON list
+            serialized_data = []
             for r in self.session_buffer:
-                db.add(SensorReading(
-                    temp=r["temp"],
-                    hum=r["hum"],
-                    target_temp=r["target_temp"],
-                    actuator=r["actuator"],
-                    light=r["light"],
-                    light_val=r["light_val"],
-                    state=r["state"],
-                    timestamp=r["timestamp"]
-                ))
+                serialized_data.append({
+                    "timestamp": r["timestamp"].strftime("%Y-%m-%d %H:%M:%S"),
+                    "temp": r["temp"],
+                    "hum": r["hum"],
+                    "target_temp": r["target_temp"],
+                    "actuator": r["actuator"],
+                    "light": r["light"],
+                    "light_val": r["light_val"],
+                    "state": r["state"]
+                })
+            
+            db = SessionLocal()
+            session_record = SavedSession(data=json.dumps(serialized_data))
+            db.add(session_record)
             db.commit()
+            session_id = session_record.id
             db.close()
-            return {"status": "success", "message": f"Uložených {len(self.session_buffer)} záznamov do databázy."}
+            return {"status": "success", "message": f"Uložené do DB pod ID: {session_id} ({len(self.session_buffer)} bodov)"}
         except Exception as e:
             return {"status": "error", "message": f"Chyba pri ukladaní do DB: {e}"}
 
@@ -228,15 +244,20 @@ class SensorManager:
             return {"status": "error", "message": "Žiadne nové dáta na uloženie do CSV."}
         
         try:
-            with open(self._csv_path, "a", newline="", encoding="utf-8") as f:
+            # Create a dedicated csv filename using unique timestamp
+            ts_suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"archive_session_{ts_suffix}.csv"
+            
+            with open(filename, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
+                writer.writerow(["timestamp", "temp", "hum", "target_temp", "actuator", "light", "light_val", "state"])
                 for r in self.session_buffer:
                     ts_str = r["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
                     writer.writerow([
                         ts_str, r["temp"], r["hum"], r["target_temp"],
                         r["actuator"], r["light"], r["light_val"], r["state"]
                     ])
-            return {"status": "success", "message": f"Uložených {len(self.session_buffer)} riadkov do archive.csv."}
+            return {"status": "success", "message": f"Uložené do súboru: {filename} ({len(self.session_buffer)} riadkov)"}
         except Exception as e:
             return {"status": "error", "message": f"Chyba pri ukladaní do CSV: {e}"}
 
@@ -267,7 +288,9 @@ class SensorManager:
                 if line:
                     try:
                         data = json.loads(line)
-                        if "action" in data:
+                        if "error" in data:
+                            print(f"[ESP32 Error] {data['error']}", flush=True)
+                        elif "action" in data:
                             action = data.get("action", "")
                             trigger = data.get("trigger", "IR prekážkový senzor")
                             if action == "start" and not self.running:

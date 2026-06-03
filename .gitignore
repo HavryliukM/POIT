@@ -1,0 +1,15 @@
+# SQLite databases
+*.db
+*.db-journal
+*.db-wal
+*.db.bak
+
+# CSV archives
+archive.csv
+archive_session_*.csv
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/

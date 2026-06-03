@@ -2,7 +2,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from models import SessionLocal, SensorReading
+from models import SessionLocal, SensorReading, SavedSession
 from sensor_manager import SensorManager
 import json
 import asyncio
@@ -28,48 +28,65 @@ async def get_history():
     return JSONResponse(content=data)
 
 
-@app.get("/api/history/db")
-async def get_history_db(limit: int = 50, from_date: str = None):
-    """Load archived data from SQLite DB with optional date filter."""
-    from datetime import datetime
+@app.get("/api/archive/load_db")
+async def load_archive_db(id: int):
+    """Load a packaged session from DB by ID."""
     db = SessionLocal()
-    query = db.query(SensorReading).order_by(SensorReading.timestamp.desc())
-    if from_date:
-        try:
-            dt = datetime.strptime(from_date, "%Y-%m-%d")
-            query = query.filter(SensorReading.timestamp >= dt)
-        except ValueError:
-            pass
-    readings = query.limit(max(1, min(limit, 500))).all()
-    data = [r.to_dict() for r in readings]
+    session_record = db.query(SavedSession).filter(SavedSession.id == id).first()
     db.close()
-    return JSONResponse(content=data)
-
-
-@app.get("/api/history/csv")
-async def get_history_csv(limit: int = 50):
-    """Load archived data from CSV file."""
-    import csv as csv_mod, os
-    csv_path = "archive.csv"
-    if not os.path.exists(csv_path):
+    if not session_record:
+        return JSONResponse(status_code=404, content={"message": f"Relácia s ID {id} neexistuje."})
+    if not session_record.data:
         return JSONResponse(content=[])
+    return JSONResponse(content=json.loads(session_record.data))
+
+
+@app.get("/api/archive/load_csv")
+async def load_archive_csv(file: str):
+    """Load session data from a specific CSV file."""
+    import csv as csv_mod, os
+    # Sanitize path to prevent directory traversal
+    filename = os.path.basename(file)
+    if not os.path.exists(filename):
+        return JSONResponse(status_code=404, content={"message": f"Súbor {filename} neexistuje."})
+    
     rows = []
-    with open(csv_path, "r", newline="", encoding="utf-8") as f:
+    with open(filename, "r", newline="", encoding="utf-8") as f:
         reader = csv_mod.DictReader(f)
         for row in reader:
             try:
+                temp_str = row.get("temp")
+                hum_str = row.get("hum")
+                temp = float(temp_str) if temp_str else 0.0
+                hum = float(hum_str) if hum_str else 0.0
+                
+                light_str = row.get("light")
+                light = int(float(light_str)) if light_str else 0
+                
+                light_val_str = row.get("light_val")
+                light_val = int(float(light_val_str)) if light_val_str else 0
+                
                 rows.append({
                     "timestamp": row.get("timestamp", ""),
-                    "temp":      float(row.get("temp", 0)),
-                    "hum":       float(row.get("hum", 0)),
-                    "light":     int(float(row.get("light", 0))),
-                    "light_val": int(float(row.get("light_val", 0))),
+                    "temp":      temp,
+                    "hum":       hum,
+                    "light":     light,
+                    "light_val": light_val,
                 })
-            except (ValueError, KeyError):
+            except Exception:
                 continue
-    # Return last N rows
-    limit = max(1, min(limit, 500))
-    return JSONResponse(content=rows[-limit:])
+    return JSONResponse(content=rows)
+
+@app.get("/api/archive/list_csv")
+async def list_csv_files():
+    """List all archive_session_*.csv files in the directory."""
+    import os, glob
+    files = glob.glob("archive_session_*.csv")
+    files.sort(reverse=True)
+    basenames = [os.path.basename(f) for f in files]
+    return JSONResponse(content=basenames)
+
+
 @app.post("/api/archive/save_db")
 async def save_archive_db():
     res = sensor_manager.save_to_db()
