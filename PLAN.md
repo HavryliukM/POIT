@@ -1,0 +1,3 @@
+Z C:\Projects\MISA mozes pouzit co potrebujes.
+
+Moje zadanie ale pozostava z toho ze mam DHT11 senzor NodeMCU ESP32, IR senzor MH senzor seris s VCC GND D0 a A0, IR prijmac ktory ma pri sebe resizor a diodu a fotosenzor a este mam rezistory s 10kOhm. Potrebujem ako to zapojit a vyuzit atd vsetko toto spravit. Kde fotosenzor bude hovorit o tom ci na dane zapojenie dopada priame svetlo alebo nie, IR senzor pri mavnuti rukou pred zapojenim spusti alebo zastavi snimanie, DHT11 senzor bude snimat teplotu a vlhkost a este by som chcel vyuzit ir senzor ktory bude prijmat signal z telefonu na vypnutie a zapnutie snimania.

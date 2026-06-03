@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="IoT Control Center – ESP32 + DHT11 monitorovanie teploty, vlhkosti a svetla s IR ovládaním">
+    <title>IoT Control Center</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}?v=10">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app">
+
+    <!-- ═══ Header ═══ -->
+    <header>
+        <div>
+            <h1>IoT Control Center</h1>
+            <p class="header-sub">NodeMCU ESP32 &bull; DHT11 &bull; IR Senzor &bull; Live Dashboard</p>
+        </div>
+        <div class="status-badge">
+            <span id="status-dot" class="dot dot--offline"></span>
+            <span id="status-text">Odpojené</span>
+        </div>
+    </header>
+
+    <!-- ═══ Top Row: 2 Gauges + Info Card ═══ -->
+    <div class="top-row">
+
+        <!-- Ciferník teploty -->
+        <div class="gauge-card gauge-card--temp">
+            <div class="gc-label">Teplota</div>
+            <div class="gc-svg-wrap">
+                <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="gTempGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#c2410c"/>
+                            <stop offset="100%" stop-color="#fbbf24"/>
+                        </linearGradient>
+                        <filter id="glow-temp">
+                            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                            <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                        </filter>
+                    </defs>
+                    <circle cx="100" cy="100" r="80" fill="none"
+                        stroke="rgba(255,255,255,0.07)" stroke-width="14" stroke-linecap="round"
+                        stroke-dasharray="377 126" transform="rotate(135 100 100)"/>
+                    <circle id="temp-arc" cx="100" cy="100" r="80" fill="none"
+                        stroke="url(#gTempGrad)" stroke-width="14" stroke-linecap="round"
+                        stroke-dasharray="0 503" transform="rotate(135 100 100)"
+                        filter="url(#glow-temp)"
+                        style="transition: stroke-dasharray 0.9s cubic-bezier(0.4,0,0.2,1)"/>
+                    <text id="temp-val" x="100" y="95"
+                        text-anchor="middle" font-family="Outfit,sans-serif"
+                        font-size="46" font-weight="700" fill="#f1f5f9" letter-spacing="-2">--</text>
+                    <text x="100" y="118" text-anchor="middle"
+                        font-family="Outfit,sans-serif" font-size="15" font-weight="500" fill="#64748b">°C</text>
+                    <text x="26" y="166" text-anchor="middle"
+                        font-family="Outfit,sans-serif" font-size="11" fill="#475569">0</text>
+                    <text x="174" y="166" text-anchor="middle"
+                        font-family="Outfit,sans-serif" font-size="11" fill="#475569">50</text>
+                </svg>
+            </div>
+            <div class="gc-badge gc-badge--temp" id="temp-badge">---</div>
+        </div>
+
+        <!-- Ciferník vlhkosti -->
+        <div class="gauge-card gauge-card--hum">
+            <div class="gc-label">Vlhkosť</div>
+            <div class="gc-svg-wrap">
+                <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="gHumGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#0369a1"/>
+                            <stop offset="100%" stop-color="#38bdf8"/>
+                        </linearGradient>
+                        <filter id="glow-hum">
+                            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                            <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                        </filter>
+                    </defs>
+                    <circle cx="100" cy="100" r="80" fill="none"
+                        stroke="rgba(255,255,255,0.07)" stroke-width="14" stroke-linecap="round"
+                        stroke-dasharray="377 126" transform="rotate(135 100 100)"/>
+                    <circle id="hum-arc" cx="100" cy="100" r="80" fill="none"
+                        stroke="url(#gHumGrad)" stroke-width="14" stroke-linecap="round"
+                        stroke-dasharray="0 503" transform="rotate(135 100 100)"
+                        filter="url(#glow-hum)"
+                        style="transition: stroke-dasharray 0.9s cubic-bezier(0.4,0,0.2,1)"/>
+                    <text id="hum-val" x="100" y="95"
+                        text-anchor="middle" font-family="Outfit,sans-serif"
+                        font-size="46" font-weight="700" fill="#f1f5f9" letter-spacing="-2">--</text>
+                    <text x="100" y="118" text-anchor="middle"
+                        font-family="Outfit,sans-serif" font-size="15" font-weight="500" fill="#64748b">%</text>
+                    <text x="26" y="166" text-anchor="middle"
+                        font-family="Outfit,sans-serif" font-size="11" fill="#475569">0</text>
+                    <text x="174" y="166" text-anchor="middle"
+                        font-family="Outfit,sans-serif" font-size="11" fill="#475569">100</text>
+                </svg>
+            </div>
+            <div class="gc-badge gc-badge--hum" id="hum-badge">---</div>
+        </div>
+
+        <!-- Informačná karta -->
+        <div class="info-card">
+            <div class="info-card-title">Informácie o systéme</div>
+            <div class="info-list">
+                <div class="info-item">
+                    <span class="info-key">Posledná aktualizácia</span>
+                    <span class="info-val" id="last-update">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-key">Osvetlenie</span>
+                    <span class="info-val info-val--light">
+                        <span class="light-dot" id="light-dot"></span>
+                        <span id="light-text">Tieň</span>
+                    </span>
+                </div>
+                <div class="info-item">
+                    <span class="info-key">LDR hodnota</span>
+                    <span class="info-val" id="light-val">0</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-key">IR ovládanie</span>
+                    <span class="info-val">
+                        <span class="ir-badge ir-badge--idle" id="ir-badge">Žiadny signál</span>
+                    </span>
+                </div>
+                <div class="info-item">
+                    <span class="info-key">Senzory</span>
+                    <span class="info-val">DHT11 &bull; LDR &bull; IR</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-key">Mikrokontrolér</span>
+                    <span class="info-val">NodeMCU ESP32</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-key">Backend</span>
+                    <span class="info-val">FastAPI + SQLite</span>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ═══ Controls Row ═══ -->
+    <div class="controls-row">
+        <!-- Ovládací panel -->
+        <div class="card">
+            <div class="card-title">Ovládanie systému</div>
+            <div class="btn-group">
+                <button id="btn-open" class="btn btn--primary">Open System</button>
+                <button id="btn-close" class="btn btn--ghost" disabled>Close System</button>
+                <button id="btn-start" class="btn btn--success" disabled>Start Monitoring</button>
+                <button id="btn-stop" class="btn btn--danger" disabled>Stop Monitoring</button>
+            </div>
+            <div class="param-row">
+                <label for="interval">Perióda merania (s):</label>
+                <input id="interval" type="number" value="1" min="0.5" step="0.5">
+                <button id="btn-set" class="btn btn--ghost">Nastaviť</button>
+            </div>
+        </div>
+
+        <!-- Event log -->
+        <div class="card">
+            <div class="card-title">Systémový log</div>
+            <div id="log-box" class="log-box">
+                <div class="log-entry">Systém pripravený na inicializáciu.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Bottom Row: Chart + Table ═══ -->
+    <div class="bottom-row">
+        <!-- Graf -->
+        <div class="card">
+            <div class="card-title">Historický vývoj</div>
+            <div class="chart-wrap">
+                <canvas id="main-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Tabuľka -->
+        <div class="card">
+            <div class="card-title">Tabuľka hodnôt</div>
+            <div class="table-wrap">
+                <table id="history-table">
+                    <thead>
+                        <tr>
+                            <th>Čas</th>
+                            <th>Teplota</th>
+                            <th>Vlhkosť</th>
+                            <th>Svetlo</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script src="{{ url_for('static', path='js/main.js') }}?v=10"></script>
+</body>
+</html>
