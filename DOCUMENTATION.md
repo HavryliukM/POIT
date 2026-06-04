@@ -2,7 +2,6 @@
 
 **Predmet:** POIT — Programovanie a ovládanie IoT systémov  
 **Autor:** Michal Havryliuk  
-**Verzia:** 3.0  
 **Dátum:** 4. jún 2026  
 **Repozitár:** https://github.com/HavryliukM/POIT  
 
@@ -10,18 +9,18 @@
 
 ## 1. Úvod a cieľ projektu
 
-Cieľom projektu **IoT Control Center** je návrh a realizácia komplexnej webovej aplikácie pre real-time monitorovanie senzorických dát v prostredí IoT (Internet of Things). Systém je postavený na mikrokontroléri **NodeMCU ESP32**, ku ktorému sú pripojené reálne senzory:
+Cieľom projektu **IoT Control Center** je návrh a realizácia webovej aplikácie pre real-time monitorovanie senzorických dát v prostredí IoT (Internet of Things). Systém je postavený na mikrokontroléri **NodeMCU ESP32**, ku ktorému sú pripojené reálne senzory:
 
 - **Senzor teploty a vlhkosti DHT11** — DHT11 na doske s LED + kábliky (#VST7991)
 - **Nepájivé pole** 400 bodov (#DPS174)
-- **Vývojová doska** NODE MCU ESP32 WiFi + Bluetooth - Áno (#IOT7551), naspájkované piny
-- **Kábliky** 40 kusov 10 cm M-M (#KAB999)
+- **Vývojová doska** NODE MCU ESP32 WiFi + Bluetooth (#IOT7551), naspájkované piny
+- **Kábliky** 10 kusov 10 cm M-M a 10 kusov 10 cm M-F (#KAB999)
 - **Rezistor** 10K ohm 1/4W z balenia (#ICS36904)
 - **Fotorezistor** GL5528 (#ICS944)
 - **Infračervený prijímač** VS1838 (#VST319)
 - **Infračervený senzor prekážok** TCRT5000 (#VST884)
 
-Aplikácia spĺňa všetkých **10 bodov zadania** — od inicializácie (Open) cez nastavenie parametrov, spustenie monitorovania (Start), zobrazovanie dát (zoznamy, grafy, ciferníky), archiváciu (DB, CSV), až po zastavenie (Stop) a ukončenie (Close). Systém implementuje aj nadštandardné funkcie: automatické zastavenie pri detekcii priameho svetla, 5-stupňovú klasifikáciu osvetlenia, simulačný režim bez hardvéru a manuálne riadenie archívu.
+Aplikácia obsahuje: inicializácie (Open) cez nastavenie parametrov, spustenie monitorovania (Start), zobrazovanie dát (zoznamy, grafy, ciferníky), archiváciu (DB, CSV), až po zastavenie (Stop) a ukončenie (Close). Systém implementuje aj funkcie: automatické zastavenie pri detekcii priameho svetla, 5-stupňovú klasifikáciu osvetlenia, simulačný režim bez hardvéru a manuálne riadenie archívu.
 
 ---
 
@@ -122,8 +121,6 @@ sequenceDiagram
 | `hum` | float | 0 – 100 % | Relatívna vlhkosť z DHT11 |
 | `light_val` | int | 0 – 4095 | Surová 12-bit ADC hodnota LDR |
 
-> **Poznámka:** Pole `light` (0/1) bolo z ESP32 firmware odstránené — binárna kategorizácia sa vykonáva na serverovej strane z hodnoty `light_val`.
-
 **ESP32 → Backend — IR udalosti:**
 ```json
 {"action": "start", "trigger": "IR prekážkový senzor"}
@@ -162,7 +159,6 @@ interval:2000\n
     "timestamp": "2026-06-04 00:05:09",
     "temp": 29.70,
     "hum": 33.00,
-    "light": 0,
     "light_val": 980
   }
 }
@@ -327,11 +323,6 @@ Kód beží v štandarde Arduino (`setup()` + `loop()`):
 2. **IR prekážkový senzor** — detekcia zostupnej hrany, debouncing 250 ms, prepína `isMeasuring`, odosiela JSON akciu
 3. **IR prijímač** — `IrReceiver.decode()`, debouncing 250 ms, prepína `isMeasuring`, `IrReceiver.resume()`
 4. **Meranie** — ak `isMeasuring` a uplynul interval: číta DHT11 (`readTemperature()`, `readHumidity()`), číta ADC (`analogRead(LDRPIN)`), odošle JSON alebo chybovú správu
-
-**Odosielaný formát JSON:**
-```json
-{"temp": 29.70, "hum": 33.00, "light_val": 980}
-```
 
 #### `static/js/main.js` — Frontend logika
 
