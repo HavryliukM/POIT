@@ -1,5 +1,5 @@
 #include <DHT.h>
-#include <IRremote.h> // Používa štandardnú knižnicu IRremote
+#include <IRremote.h> 
 
 // Definícia pinov na ESP32
 #define DHTPIN 23        // Pin pre DHT11 dáta
