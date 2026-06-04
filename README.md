@@ -36,7 +36,7 @@ Webová IoT aplikácia pre real-time monitorovanie teploty, vlhkosti a intenzity
 
 ---
 
-## Splnenie požiadaviek zadania (10 bodov)
+## Splnenie požiadaviek zadania
 
 | # | Požiadavka | Implementácia |
 |:---:|:---|:---|
@@ -103,7 +103,7 @@ http://127.0.0.1:5001
 
 ### Krok 1 — USB Passthrough (prebratie ESP32 do VM)
 
-> ⚠️ Kľúčový krok — bez neho VM nevidí ESP32.
+> Kľúčový krok — bez neho VM nevidí ESP32.
 
 **VirtualBox:**
 1. Nainštaluj **VirtualBox Extension Pack** (rovnaká verzia ako VirtualBox, stiahni z virtualbox.org)
@@ -126,9 +126,11 @@ dmesg | tail -20
 # Hľadaj riadok: "cp210x converter now attached to ttyUSB0"
 # alebo:
 ls /dev/ttyUSB* /dev/ttyACM*
+sudo dmesg | grep -i usb
+sudo dmesg | grep -i tty
 ```
 
-ESP32 je zvyčajne `/dev/ttyUSB0`.
+ESP32 je zvyčajne `/dev/ttyUSB0` alebo vo VM `/dev/ttyACM0`.
 
 ---
 
@@ -138,6 +140,7 @@ ESP32 je zvyčajne `/dev/ttyUSB0`.
 sudo apt update && sudo apt upgrade -y
 sudo apt install python3-pip git -y
 pip3 install fastapi uvicorn sqlalchemy pyserial
+pip3 intall websockets
 ```
 
 ---
@@ -151,7 +154,7 @@ cd POIT
 
 ---
 
-### Krok 5 — ⚠️ Zmeň serial port v kóde
+### Krok 5 —  Zmeň serial port v kóde
 
 V súbore `sensor_manager.py` zmeň riadok:
 
@@ -160,22 +163,12 @@ V súbore `sensor_manager.py` zmeň riadok:
 def __init__(self, port="COM5", baudrate=9600):
 
 # Zmeň na:
-def __init__(self, port="/dev/ttyUSB0", baudrate=9600):
+def __init__(self, port="/dev/ttyACM0", baudrate=9600):
 ```
 
 ---
 
-### Krok 6 — Prístupové práva k sériovej linke (jednorazové)
-
-```bash
-sudo usermod -a -G dialout $USER
-# Odhlásiť sa a znovu prihlásiť, potom overiť:
-groups | grep dialout
-```
-
----
-
-### Krok 7 — Spustenie servera
+### Krok 6 — Spustenie servera
 
 ```bash
 python3 app.py
@@ -183,7 +176,7 @@ python3 app.py
 
 ---
 
-### Krok 8 — Otvorenie dashboardu
+### Krok 7 — Otvorenie dashboardu
 
 - **Z VM samotnej:** `http://127.0.0.1:5001`
 - **Z hostiteľského PC:** zisti IP VM cez `hostname -I`, potom `http://[IP-VM]:5001`
@@ -194,9 +187,8 @@ python3 app.py
 
 | | Windows | Raspberry Pi OS (VM/natívne) |
 |:---|:---|:---|
-| Serial port | `COM5` | `/dev/ttyUSB0` |
+| Serial port | `COM5` | `/dev/ttyUSB0` `/dev/ttyACM0` |
 | Spustenie | `python app.py` | `python3 app.py` |
-| Skupinové práva | nie je potrebné | `sudo usermod -a -G dialout $USER` |
 | Dashboard URL | `http://127.0.0.1:5001` | `http://127.0.0.1:5001` alebo `http://[IP]:5001` |
 
 ---
@@ -206,7 +198,7 @@ python3 app.py
 - **Senzor teploty a vlhkosti DHT11** — DHT11 na doske s LED + kábliky (#VST7991)
 - **Nepájivé pole** 400 bodov (#DPS174)
 - **Vývojová doska** NODE MCU ESP32 WiFi + Bluetooth - Áno (#IOT7551), naspájkované piny
-- **Kábliky** 40 kusov 10 cm M-M (#KAB999)
+- **Kábliky** 10 kusov 10 cm M-M a 10 kusov 10 cm M-F (#KAB999)
 - **Rezistor** 10K ohm 1/4W z balenia (#ICS36904)
 - **Fotorezistor** GL5528 (#ICS944)
 - **Infračervený prijímač** VS1838 (#VST319)
